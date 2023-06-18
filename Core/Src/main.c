@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stdio.h"
+#include "stdbool.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -36,9 +37,11 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define R_VALUE 	(1000u)		//ohm
-char transmit_buffer[20] ={0};
-uint8_t flag = 0;
+#define R_VALUE 				(1000u)		//ohm
+#define DISCHARGE_CAPACITOR		(GPIOC->ODR |= 1<<0)
+#define CHARGE_CAPACITOR		(GPIOC->ODR &= ~(1<<0))
+#define IS_BUTTON_PUSHED		!(GPIOC->IDR & 1<<13)
+
 
 /* USER CODE END PM */
 
@@ -50,6 +53,8 @@ TIM_HandleTypeDef htim1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+char result[20] ={0};
+uint8_t is_measurement_done = 0;
 
 /* USER CODE END PV */
 
@@ -101,12 +106,10 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  GPIOC->ODR |= 1<<0;
+  DISCHARGE_CAPACITOR;
   HAL_ADC_Start(&hadc1);
   lcd_init();
   HAL_Delay(50);
-  lcd_string("valami");
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -116,15 +119,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  if(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == 0){
-		  //HAL_Delay(100);
-			GPIOC->ODR &= ~(1<<0);				//Output the step signal
+	  if(IS_BUTTON_PUSHED){
+			CHARGE_CAPACITOR;
 			HAL_TIM_Base_Start(&htim1);
-			while(flag == 0);
-			lcd_string(transmit_buffer);
+			while(is_measurement_done == false);
+			lcd_string(result);
 			HAL_ADC_Start(&hadc1);
 	  }
-	  flag = 0;
+	  is_measurement_done = false;
 
 
   }
@@ -376,37 +378,26 @@ static void MX_GPIO_Init(void)
 void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef * hadc)
 {
 	uint16_t time;				//us
-
 	float cap_value;
+
 	time = TIM1->CNT;
 	HAL_TIM_Base_Stop(&htim1);
 	TIM1->CNT = 0;
 	if(time < 1000){
-		sprintf(transmit_buffer, "%d nF",time);
-		flag = 1;
-
-		//lcd_string(transmit_buffer);
-		//memset(transmit_buffer, '\0', sizeof(transmit_buffer));
+		cap_value = time;					//No need to divide with R because result will be cap value in nFs
+		sprintf(result, "%d nF",cap_value);
+		is_measurement_done = true;
 	}
 
 	else{
 		cap_value = time/R_VALUE;
-		sprintf(transmit_buffer, "%0.3f uF",cap_value);
-		flag = 1;
-		//lcd_string(transmit_buffer);
-	//	memset(transmit_buffer, '\0', sizeof(transmit_buffer));
+		sprintf(result, "%0.3f uF",cap_value);
+		is_measurement_done = true;
 	}
 
-	GPIOC->ODR |= 1<<0;						// Discharge capacitor
-	HAL_ADC_Stop(&hadc1);
+	DISCHARGE_CAPACITOR;
+	HAL_ADC_Stop(&hadc1);					// Stopping ADC to prevent re-trigger callback
 }
-
-/*void HAL_GPIO_EXTI_Callback (uint16_t GPIO_Pin)
-{
-		GPIOC->ODR &= ~(1<<0);				//Output the step signal
-		HAL_TIM_Base_Start(&htim1);
-
-}*/
 /* USER CODE END 4 */
 
 /**
